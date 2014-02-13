@@ -1,0 +1,184 @@
+
+
+% To compile this document
+% library('knitr'); rm(list=ls()); knit('illumina-prac.Rnw')
+
+\documentclass[12pt]{article}
+\usepackage{wasysym,marvosym}
+\newcommand{\usecase}{\textit{\textbf{Use Case: }}}
+\newcommand{\notebell}{\bell}
+\newcommand{\noteright}{\Pointinghand}
+\newcommand{\textinfo}{\Info}
+
+<<knitr, echo=FALSE, results="hide">>=
+library("knitr")
+opts_chunk$set(tidy=FALSE,dev="png",fig.show="hide",
+               fig.width=4,fig.height=4.5,
+               message=FALSE,eval=F)
+@ 
+
+<<style, eval=TRUE, echo=FALSE, results="asis">>=
+BiocStyle::latex()
+@
+
+
+\title{Bioconductor Basics}
+
+\author{Mark Dunning}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{document}
+\maketitle
+\tableofcontents
+\section{Introduction}
+
+\subsection{Aims}
+
+\section{Affymetrix arrays}
+Affymetrix microarrays are a popular commercial platform available for a wide range of genomics applications (gene expression profiling, SNP genotyping, ChIP-chip analysis etc.) in different species.
+The main distinction between Affymetrix and other array technologies is the use of many short (25mer) probes to measure hybridisation.
+In this practical, we explore the basic analysis issues for Affymetrix GeneChips which mea- sure gene expression using multiple (11-20) perfect match (PM) and mismatch (MM) probes concentrated in the 3' region of each transcript. Despite our focus on expression arrays, many of the processing steps, such as quality assessment and normalisation are equally important for other applications of Affymetrix technology to ensure that the signal is comparable between arrays.
+In this practical we use several Bioconductor packages (affy, affyPLM, limma, etc.) to read in the raw data, assess data quality, normalise, summarise an example dataset.
+
+\subsection{The Estrogen dataset}
+
+The experiment we will analyse is from [1], and is made up of eight Affymetrix HGU95Av2 GeneChips. The aim of the experiment is briefly described below (excerpt taken from the factDesign package vignette). \textit{The investigators in this experiment were interested in the effect of estrogen on the genes in ER+ breast cancer cells over time. After serum starvation of all eight samples, they exposed four samples to estrogen, and then measured mRNA transcript abundance after 10 hours for two samples and 48 hours for the other two. They left the remaining four samples untreated, and measured mRNA transcript abundance at 10 hours for two samples, and 48 hours for the other two. Since there are two factors in this experiment (estrogen and time), each at two levels (present or absent, 10 hours or 48 hours), this experiment is said to have a 2 $\times$ 2 factorial design.}
+
+The raw data is available in the estrogen package from {\tt http://www.bioconductor.org/help/bioc-views/release/data/experiment/.}
+The cel files for this experiment are available in the extdata directory of the package. 
+\subsection{Reading the raw data}
+
+We will make use of a \textit{targets} file to define the samples involved in the experiment that we wish to analyse. This simple file can be used to define the names of the cel files that we wish to read, and the biological sample hybridised to each cel file. There should be one row for each cel file, but the number of columns is arbitrary. It is good practice to record as much relevant information as you can in this file.
+
+
+\usecase Make sure that the you are in the correct working directory and that the cel files and targets file ({\tt targLimma.txt}) are present. Read the targets file and confirm that there are two replicates of each condition. Read in the intensity data stored in the cel files. How many probes are there on each array?
+
+<<>>=
+library(affy)
+getwd()
+list.files()
+targets = read.AnnotatedDataFrame(tFile,header=TRUE,row.names=1,as.is=TRUE) 
+pData(targets)
+
+rawdata = ReadAffy(filenames=pData(targets)$FileName,phenoData=targets)
+rawdata
+@
+
+\noteright Typing the name of the object that we have assigned the raw data to (\Robject{rawdata} in our case) will print a summary of information stored in the object and not the actual intensity values themselves.
+
+\fixme{Examples of issues with targets files?}
+
+\subsection{Quality assessment}
+As with other microarray technologies, quality assessment is an important part of the analysis process. Data quality can be checked using various diagnostic plots.
+
+\usecase Generate image plots of the first two arrays. Do you observe any serious spatial artefacts which might warrant removal of either of these arrays from further analysis? Pro- duce a boxplot of the intensities. What do you notice about the signal?
+
+
+<<>>=
+image(rawdata[,1])
+image(rawdata[,2])
+boxplot(rawdata, col="red", las=2)
+@
+
+\noteright It is clear from these plots that there is a systematic difference in signal between the 10 hour arrays and the 48 hour arrays. Most normalisation methods would remove this effect, as they assume that the signal for the majority of genes does not change between arrays. The experimenters felt that there was no possible biological reason why all genes would be more highly expressed at 48 hours than 10 hours, and that these differences must be an experimental artefact, which might be due to changes to the scanning settings.
+
+\usecase
+Make a pairs plot of the PM intensities from arrays 1-4 and 5-8 to compare the data from the replicate arrays. Based on all the plots you have generated, what would you conclude about the overall quality of this experiment? Would you use all the data in the downstream differential expression analysis?
+
+<<>>=
+mva.pairs(pm(rawdata)[,1:4])
+mva.pairs(pm(rawdata)[,5:8])
+@
+
+\usecase Generate histograms of the PM and MM intensities from the first array. Do you notice any difference in the signal distribution of the PMs and MMs?
+
+<<>>=
+par(mfrow=c(2,1))
+hist(log2(pm(rawdata[,1])), breaks=100, col="blue", main="PM", xlim=c(4,14))
+hist(log2(mm(rawdata[,1])), breaks=100, col="red", main="MM", xlim=c(4,14))
+@
+
+\noteright Most analysis algorithms do not use the MM probes, as they measure more than just non-specific background.
+
+\subsection{Probe-level linear models}
+
+Probe-level Linear Models (PLMs) can be used as an additional tool to assess relative data quality within an experiment. Many different model specifications are possible, with the simplest fitting chip, and probe effects to the log2 intensities within each probeset across an experiment in a robust way.
+The output is a matrix of residuals, or weights for each chip which can be used as an additional diagnostic; systematically high residuals across an entire array, or a large fraction of an array is indicative of an outlier array. The main use of this tool is in deciding whether or not to keep an array in the down-stream data analysis.
+
+\usecase Create image plots (used to diagnose spatial artefacts) for the first two chips and compare them with the image plots you obtained previously. Make a boxplot of the normalised unscaled standard errors (NUSE) and relative log-expression (RLE). Does any chip have systematically high standard errors?
+
+<<>>=
+library(affyPLM)
+plmset <- fitPLM(rawdata)
+image(plmset,1)
+image(plmset,2)
+
+NUSE(plmset,las=2)
+RLE(plmset,las=2)
+@
+
+\subsection{Creating an ExpressionSet}
+
+Many normalisation and summarisation methods have been developed for Affymetrix data. These include MAS5.0 and PLIER which were developed by Affymetrix and RMA, GC-RMA, dChip and vsn (to name but a few) which have been developed by academic re- searchers.
+Many of these methods are available in the affy package. For a comparison of some of these methods and assessment of their performance on different control data sets, see [2] or [3]. In this practical we will use the RMA (Robust Multichip Averaging) method described in [4]. This method applies a model based background adjustment followed by quantile normali- sation and a robust summary method (median polish) on the log2 PM intensities to obtain probeset summary values.
+
+\usecase Normalize the Estrogen data using RMA. Plot the normalised data and assess whether it has been effective by comparing it to the non-normalised data.
+
+
+
+<<>>=
+eset <- rma(rawdata)
+eset
+boxplot(data.frame(exprs(eset)),col="blue", ylim=c(4,16))
+mva.pairs(pm(rawdata)[,3:6])
+mva.pairs(exprs(eset)[,3:6], log.it=FALSE)
+@
+
+\noteright We need to specify log.it=FALSE in mva.pairs as the expression measurements in eset have already been log-transformed as part of the RMA algorithm. You can also use the function MAplot to get individual MA plots.
+
+\noteright
+Many other pre-processing, normalisation and summarisation options are available using the expresso function. Type the following to find out what they are. Refer to the help page for further details.
+
+<<>>=
+bgcorrect.methods()
+normalize.methods(rawdata)
+pmcorrect.methods()
+express.summary.stat.methods()
+@
+
+
+
+\subsection{Exploring the ExpressionSet}
+
+<<>>=
+pData(eset)
+sampleNames(eset)
+featureNames(eset)[1:10]
+@
+
+<<>>=
+head(exprs(eset))
+@
+
+<<>>=
+eset[1:10,]
+eset[,1:4]
+eset[,grep("Absent", pData(eset)[,2])]
+
+@
+
+
+\subsection{Generating a QC Report}
+
+\usecase Generate a quality assessment report of the data using \Biocpkg{arrayQualityMetrics}
+
+<<>>=
+library(arrayQualityMetrics)
+
+arrayQualityMetrics(eset)
+
+@
+
+
+
+
+\end{document}
