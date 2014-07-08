@@ -10,9 +10,9 @@
 
 <<knitr, echo=FALSE, results="hide">>=
 library("knitr")
-opts_chunk$set(tidy=FALSE,dev="png",fig.show="hide",
+opts_chunk$set(tidy=FALSE,dev="png",fig.show=TRUE,
                fig.width=4,fig.height=4.5,
-               message=FALSE,eval=F)
+               message=FALSE,eval=TRUE,echo=TRUE,results="hide")
 @ 
 
 <<style, eval=TRUE, echo=FALSE, results="asis">>=
@@ -38,9 +38,48 @@ Read the NKI expression values into R. What type of object is created? How can y
 expression <- read.delim("data/NKI295.exprs.txt")
 dim(expression)
 head(expression)
+expression[1:10,]
+expression[1:5,1:10]
 
+@
+
+You will see that the first column of the data frame gives the probe IDs that were used on the microarray. Create a new data frame without these IDs, and that has the IDs as row names
+
+
+<<>>=
+rownames(expression) <- expression[,1]
 evals <- expression[,-1]
 @
+
+Each row in this new matrix contains the expression values for a particular (arbitrary) gene for each patient in the study. 
+
+<<>>=
+evals[1,]
+summary(as.numeric(evals[1,]))
+mean(as.numeric(evals[1,]))
+hist(as.numeric(evals[1,]))
+colnames(evals)[which(evals[1,] > 2)]
+colnames(evals)[which(evals[1,] < -4)]
+@
+
+<<>>=
+plot(as.numeric(evals[1,]))
+plot(as.numeric(evals[1,]),col="steelblue",pch=16)
+plot(as.numeric(evals[1,]),col="steelblue",pch=16,xlab="Patient",ylab="Expression value")
+abline(h=c(-4,4))
+@
+
+
+<<>>=
+values <- as.numeric(evals[1,])
+plot(values)
+plot(values,col="steelblue",pch=16)
+outl <- which(abs(values) > 4)
+abline(h=c(-4,4))
+points(outl,values[outl],col="red",pch=16)
+
+@
+
 
 
 
@@ -53,6 +92,44 @@ head(clinical)
 
 @
 
+
+\subsection{Summarising the clincal variables}
+
+Select the following columns from the clinical data; sample name, size, node, grade and ER. Do this at least two different ways. Produce a numeric summary
+
+<<>>=
+colnames(clinical)
+clinical[,c(1,8,9,10,11)]
+clinical[,c("sampleNames", "size", "node","grade","ER")]
+summary(clinical[,c("sampleNames", "size", "node","grade","ER")])
+@
+
+
+<<>>=
+par(mfrow=c(2,2))
+barplot(summary(clinical$size),col=c("steelblue", "mistyrose"))
+barplot(summary(clinical$node))
+barplot(summary(clinical$grade))
+barplot(summary(clinical$ER))
+
+@
+
+<<>>=
+barplot(table(clinical$ER,clinical$grade),beside=TRUE)
+@
+The age of each patient is given as a numeric value, so needs to be summarised differently. However, the summary function is clever enough to be able to handle numerical, as well as categorical data. Produce a boxplot and verify
+
+
+<<>>=
+summary(clinical$Age.years.)
+boxplot(clinical$Age.years.)
+@
+
+
+<<>>=
+hist(clinical$Age.years.)
+@
+
 Finally, read the feature annotation for the dataset. Again, what are the dimensions are how to they correspond to the expression values?
 
 <<>>=
@@ -60,7 +137,9 @@ features <- read.delim("data//NKI295.fdata.txt")
 head(features)
 @
 
-\section{Creating an ExpressionSet}
+\section{Combining expression values, clinical data and feature information}
+
+\subsection{Creating an ExpressionSet}
 
 Load the Biobase package and create an ExpressionSet representation of the data using the \Rfunction{readExpressionSet} function. If you didn't have Biobase installed, how would you install it? How can you find out what \Rfunction{readExpressionSet} does and the arguments it accepts?
 
@@ -134,7 +213,10 @@ erPosSamp
 posAve <- rowMeans(evals[,erPosSamp])
 negAve <- rowMeans(evals[,erNegSamp])
 
+M <- posAve - negAve
+A <- (posAve + negAve)*0.5
 
+plot(A,M)
 
 @
 
