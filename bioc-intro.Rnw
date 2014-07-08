@@ -1,0 +1,156 @@
+%\VignetteIndexEntry{Genomic Annotation Practical}
+%\VignettePackage{GeneticsHTSCourse}
+%\VignetteEngine{knitr::knitr}
+
+% To compile this document
+% library('knitr'); rm(list=ls()); knit('DESeq2.Rnw')
+
+\documentclass[12pt]{article}
+\newcommand{\usecase}{\textit{\textbf{Use Case: }}}
+
+<<knitr, echo=FALSE, results="hide">>=
+library("knitr")
+opts_chunk$set(tidy=FALSE,dev="png",fig.show="hide",
+               fig.width=4,fig.height=4.5,
+               message=FALSE,eval=F)
+@ 
+
+<<style, eval=TRUE, echo=FALSE, results="asis">>=
+BiocStyle::latex()
+@
+
+
+\title{Introduction to Bioconductor and {\tt R} refresher}
+
+\author{Mark Dunning}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{document}
+
+\maketitle
+\tableofcontents
+\section{Introduction}
+The purpose of this practical is to introduce some of the key object-types that are used in the Bioconductor project, and to refresh your memory on R basics
+
+\subsection{Reading data into R}
+Read the NKI expression values into R. What type of object is created? How can you find out the dimensions of this file? How would you read the data differently if the file was comma-separated?
+
+<<>>=
+expression <- read.delim("data/NKI295.exprs.txt")
+dim(expression)
+head(expression)
+
+evals <- expression[,-1]
+@
+
+
+
+Now read the clinical annotations for the dataset. What are the dimensions of the resulting object and how do they relate to the expression values?
+
+<<>>=
+clinical <- read.delim("data//NKI295.pdata.txt")
+dim(clinical)
+head(clinical)
+
+@
+
+Finally, read the feature annotation for the dataset. Again, what are the dimensions are how to they correspond to the expression values?
+
+<<>>=
+features <- read.delim("data//NKI295.fdata.txt")
+head(features)
+@
+
+\section{Creating an ExpressionSet}
+
+Load the Biobase package and create an ExpressionSet representation of the data using the \Rfunction{readExpressionSet} function. If you didn't have Biobase installed, how would you install it? How can you find out what \Rfunction{readExpressionSet} does and the arguments it accepts?
+
+<<>>=
+library(Biobase)
+eset <- readExpressionSet("data//NKI295.exprs.txt", "data//NKI295.pdata.txt")
+?readExpressionSet
+@
+
+Show a summary of the eset object and verify that it has the correct number of samples and features. 
+
+<<>>=
+eset
+@
+
+\section{Exploratory analysis}
+
+
+\section{Extracting the data for a particular gene}
+
+Use the features matrix to find the probe ID for the \textit{ESR1} gene. Extract the row from the expression matrix that corresponds to this probe.
+
+<<>>=
+head(features)
+match("ESR1", features[,2])
+features[match("ESR1", features[,2]),]
+
+myrow <- match("ESR1", features[,2])
+mygene <- exprs(eset)[myrow,]
+mygene
+plot(density(mygene))
+@
+
+
+\section{}
+Remind yourself of the contents of the clinical file, and create a vector to store the ER status of each sample. 
+
+Make a boxplot of ESR1 expression in ER positive and ER negative groups. Do you notice a trend? Calculate the mean expression of ESR1 in ER positive and ER negative samples. Finally, use a t-test to test if the difference is significant.
+
+
+<<>>=
+head(pData(eset))
+
+ERStatus <- pData(eset)$ER
+
+boxplot(mygene ~ ERStatus)
+
+tapply(mygene, ERStatus, mean)
+
+t.test(mygene ~ ERStatus)
+@
+
+The genefilter package contains a convenient way to calculate t-statistics for many genes simultaneously. Use the \Rfunction{rowttests} function to calculate t-statistics for each gene. Create an ordered vector of absolute t-tstatistics.
+
+<<>>=
+library(genefilter)
+tstats <- rowttests(exprs(eset), as.factor(ERStatus))
+head(tstats)
+
+ordt <- order(abs(tstats),decreasing=TRUE)
+@
+
+
+<<>>=
+erNegSamp <- which(clinical$ER == "Negative")
+erNegSamp
+
+erPosSamp <- which(clinical$ER == "Positive")
+erPosSamp
+
+posAve <- rowMeans(evals[,erPosSamp])
+negAve <- rowMeans(evals[,erNegSamp])
+
+
+
+@
+
+
+Now use a {\tt for} loop to make boxplots of the top 10 genes and save to a pdf file. Put the Symbol of each gene in the plot title.
+
+<<>>=
+pdf("TopGenes.pdf")
+
+for(i in 1:10){
+  rowind <- ordt[i]
+  geneName <- features[rowind,2]
+  boxplot(exprs(eset)[rowind,]~ERStatus,main=geneName)
+}
+dev.off()
+
+@
+
+\end{document}
